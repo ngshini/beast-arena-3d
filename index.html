@@ -322,6 +322,7 @@ function buildFighter(cfg){
   const tailG=new THREE.Group(); tailG.position.set(-0.2,0.1,-0.05); hips.add(tailG);
   const tail=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.02,0.7,8), furMat);
   tail.position.y=-0.3; tail.rotation.z=0.7; tailG.add(tail); tailG.visible=false;
+  J.tailG=tailG;
   root.scale.setScalar(cfg.scale||1);
   scene.add(root);
   return { root, body, J, beastHead, chestFur, tailG, cfg,
