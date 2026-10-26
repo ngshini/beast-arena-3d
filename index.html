@@ -161,6 +161,8 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
 /* ============ RENDERER / SCENE ============ */
 const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
@@ -248,90 +250,124 @@ const rand=(a,b)=>a+Math.random()*(b-a);
   scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color:0xa5c4ff, size:0.3, fog:false })));
 }
 const flames = window.__flames; delete window.__flames;
+/* Sky gradient dome + spotlight cone + floating embers */
+const skyDome = new THREE.Mesh(new THREE.SphereGeometry(70, 24, 14), new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite:false, fog:false,
+  uniforms: { topColor:{ value:new THREE.Color(0x12082e) }, botColor:{ value:new THREE.Color(0x3b1d5e) } },
+  vertexShader:'varying vec3 vP; void main(){ vP=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+  fragmentShader:'uniform vec3 topColor; uniform vec3 botColor; varying vec3 vP; void main(){ float h=clamp(normalize(vP).y*1.5+0.15,0.0,1.0); gl_FragColor=vec4(mix(botColor,topColor,pow(h,0.75)),1.0); }'
+}));
+skyDome.renderOrder=-10; scene.add(skyDome);
+{
+  const cone=new THREE.Mesh(new THREE.ConeGeometry(5.2,11.5,24,1,true),
+    new THREE.MeshBasicMaterial({ color:0xffe9b0, transparent:true, opacity:0.045, blending:THREE.AdditiveBlending, side:THREE.DoubleSide, depthWrite:false, fog:false }));
+  cone.position.set(0,5.6,-0.5); scene.add(cone);
+}
+const EMBERS=130, emberBase=[];
+const emberGeo=new THREE.BufferGeometry();
+{
+  const pos=new Float32Array(EMBERS*3);
+  for(let i=0;i<EMBERS;i++){ const bx=rand(-11,11), by=rand(0,7), bz=rand(-9,3); emberBase.push({x:bx,y:by,z:bz,sp:rand(0.25,0.8),ph:rand(0,6)}); pos[i*3]=bx; pos[i*3+1]=by; pos[i*3+2]=bz; }
+  emberGeo.setAttribute('position', new THREE.BufferAttribute(pos,3));
+}
+const embers=new THREE.Points(emberGeo, new THREE.PointsMaterial({ color:0xffa040, size:0.09, transparent:true, opacity:0.85, blending:THREE.AdditiveBlending, depthWrite:false }));
+scene.add(embers);
 
-/* ============ FIGHTER BUILDER (jointed humanoid + beast form) ============ */
-function limb(w,len,color,opts={}){
-  const m=new THREE.Mesh(new THREE.BoxGeometry(w,len,w),
-    new THREE.MeshStandardMaterial({ color, roughness:0.65, metalness:0.15, emissive:opts.emissive??0x000000, emissiveIntensity:opts.ei??0 }));
-  m.position.y=-len/2; m.castShadow=true;
-  const pivot=new THREE.Group(); pivot.add(m); pivot.userData.mesh=m;
-  return pivot;
+/* ============ FIGHTER BUILDER (real Xbot model + beast attachments) ============ */
+let TEMPLATE=null;
+async function loadFighterAssets(){
+  const gltf=await new GLTFLoader().loadAsync('models/Xbot.glb');
+  TEMPLATE=gltf;
+}
+function makeBeastHead(fur){
+  const g=new THREE.Group();
+  const furMat=new THREE.MeshStandardMaterial({ color:fur, roughness:0.95 });
+  const skull=new THREE.Mesh(new THREE.SphereGeometry(0.26,16,14), furMat); skull.scale.set(1,0.95,1.05); g.add(skull);
+  const mane=new THREE.Mesh(new THREE.SphereGeometry(0.34,14,12), furMat); mane.position.set(0,0.02,-0.1); mane.scale.set(1,1,0.75); g.add(mane);
+  const snout=new THREE.Mesh(new THREE.BoxGeometry(0.26,0.2,0.36), furMat); snout.position.set(0,-0.08,0.3); g.add(snout);
+  const jaw=new THREE.Mesh(new THREE.BoxGeometry(0.22,0.07,0.3), furMat); jaw.position.set(0,-0.2,0.28); g.add(jaw);
+  const nose=new THREE.Mesh(new THREE.BoxGeometry(0.13,0.08,0.07), new THREE.MeshBasicMaterial({ color:0x181018 })); nose.position.set(0,-0.01,0.5); g.add(nose);
+  for(const sd of [-1,1]){
+    const ear=new THREE.Mesh(new THREE.ConeGeometry(0.1,0.3,8), furMat); ear.position.set(sd*0.16,0.3,-0.02); ear.rotation.z=-sd*0.28; g.add(ear);
+    const fang=new THREE.Mesh(new THREE.ConeGeometry(0.032,0.13,6), new THREE.MeshBasicMaterial({ color:0xffffff }));
+    fang.position.set(sd*0.075,-0.16,0.42); fang.rotation.x=Math.PI; g.add(fang);
+    const eye=new THREE.Mesh(new THREE.SphereGeometry(0.034,8,8), new THREE.MeshBasicMaterial({ color:0xffcc22 }));
+    eye.position.set(sd*0.11,0.05,0.22); g.add(eye);
+  }
+  g.visible=false;
+  return g;
+}
+function makeClaws(){
+  const g=new THREE.Group();
+  for(let i=-1;i<=1;i++){
+    const cl=new THREE.Mesh(new THREE.ConeGeometry(0.03,0.2,6), new THREE.MeshBasicMaterial({ color:0xf8fafc }));
+    cl.position.set(i*0.06,-0.1,0.02); cl.rotation.x=Math.PI; g.add(cl);
+  }
+  g.visible=false;
+  return g;
 }
 function buildFighter(cfg){
-  // cfg: { skin, cloth, beastFur, scale }
-  const root=new THREE.Group();
-  const body=new THREE.Group(); root.add(body);
-  const J={};
-  const skinMat=new THREE.MeshStandardMaterial({ color:cfg.skin, roughness:0.6 });
-  const clothMat=new THREE.MeshStandardMaterial({ color:cfg.cloth, roughness:0.8 });
-  const furMat=new THREE.MeshStandardMaterial({ color:cfg.beastFur, roughness:0.95 });
-  // hips + torso
-  const hips=new THREE.Group(); hips.position.y=1.08; body.add(hips); J.hips=hips;
-  const pelvis=new THREE.Mesh(new THREE.BoxGeometry(0.52,0.3,0.34), clothMat); pelvis.castShadow=true; hips.add(pelvis);
-  const torsoG=new THREE.Group(); torsoG.position.y=0.12; hips.add(torsoG); J.torso=torsoG;
-  const torso=new THREE.Mesh(new THREE.BoxGeometry(0.64,0.72,0.4), clothMat); torso.position.y=0.38; torso.castShadow=true; torsoG.add(torso);
-  const chest=new THREE.Mesh(new THREE.BoxGeometry(0.68,0.3,0.44), skinMat); chest.position.y=0.6; chest.castShadow=true; torsoG.add(chest);
-  // beast chest fur (shown in beast form)
-  const chestFur=new THREE.Mesh(new THREE.BoxGeometry(0.72,0.62,0.48), furMat); chestFur.position.y=0.42; chestFur.visible=false; torsoG.add(chestFur);
-  // head
-  const headG=new THREE.Group(); headG.position.y=0.86; headG.rotation.y=Math.PI/2; torsoG.add(headG); J.head=headG;
-  const skull=new THREE.Mesh(new THREE.SphereGeometry(0.215,16,14), skinMat); skull.position.y=0.14; skull.castShadow=true; headG.add(skull);
-  const hair=new THREE.Mesh(new THREE.SphereGeometry(0.225,16,12,0,Math.PI*2,0,Math.PI*0.55), new THREE.MeshStandardMaterial({ color:cfg.hair, roughness:1 }));
-  hair.position.y=0.17; headG.add(hair);
-  const eyeMat=new THREE.MeshBasicMaterial({ color:0x111111 });
-  for(const sd of [-1,1]){ const eye=new THREE.Mesh(new THREE.SphereGeometry(0.028,8,8), eyeMat); eye.position.set(sd*0.08,0.16,0.19); headG.add(eye); }
-  // beast head parts
-  const beastHead=new THREE.Group(); beastHead.visible=false; headG.add(beastHead);
-  const bSkull=new THREE.Mesh(new THREE.SphereGeometry(0.24,14,12), furMat); bSkull.position.y=0.15; bSkull.castShadow=true; beastHead.add(bSkull);
-  const snout=new THREE.Mesh(new THREE.BoxGeometry(0.24,0.18,0.34), furMat); snout.position.set(0,0.05,0.3); beastHead.add(snout);
-  const nose=new THREE.Mesh(new THREE.BoxGeometry(0.12,0.07,0.06), new THREE.MeshBasicMaterial({ color:0x181018 })); nose.position.set(0,0.1,0.48); beastHead.add(nose);
-  for(const sd of [-1,1]){
-    const ear=new THREE.Mesh(new THREE.ConeGeometry(0.09,0.26,8), furMat); ear.position.set(sd*0.14,0.42,0); ear.rotation.z=-sd*0.25; beastHead.add(ear);
-    const fang=new THREE.Mesh(new THREE.ConeGeometry(0.03,0.11,6), new THREE.MeshBasicMaterial({ color:0xffffff }));
-    fang.position.set(sd*0.07,-0.03,0.42); fang.rotation.x=Math.PI; beastHead.add(fang);
-    const bEye=new THREE.Mesh(new THREE.SphereGeometry(0.032,8,8), new THREE.MeshBasicMaterial({ color:0xffcc22 }));
-    bEye.position.set(sd*0.1,0.2,0.2); beastHead.add(bEye);
+  const root=new THREE.Group();          // position + facing yaw
+  const body=new THREE.Group();          // jump height + KO fall (local x-rot)
+  root.add(body);
+  const model=SkeletonUtils.clone(TEMPLATE.scene);
+  body.add(model);
+  // materials: clone + tint (body limbs + joint spheres)
+  let bodyMat=null, jointMat=null;
+  model.traverse(o=>{
+    if(o.isMesh || o.isSkinnedMesh){
+      o.castShadow=true; o.frustumCulled=false;
+      o.material=o.material.clone();
+      if(o.material.name && o.material.name.includes('Joints')){ jointMat=o.material; jointMat.color.setHex(cfg.joint); jointMat.roughness=0.5; }
+      else { bodyMat=o.material; bodyMat.color.setHex(cfg.tint); bodyMat.roughness=0.62; }
+    }
+  });
+  const mixer=new THREE.AnimationMixer(model);
+  const actions={};
+  for(const clip of TEMPLATE.animations){
+    const a=mixer.clipAction(clip); a.enabled=false; actions[clip.name]=a;
   }
-  const mane=new THREE.Mesh(new THREE.SphereGeometry(0.3,12,10), furMat); mane.position.set(0,0.14,-0.08); mane.scale.set(1,1,0.8); beastHead.add(mane);
-  // arms: near (z+) and far (z-)
-  function makeArm(sideZ){
-    const sh=new THREE.Group(); sh.position.set(0,0.68,sideZ); torsoG.add(sh);
-    const up=limb(0.17,0.5,cfg.skin); sh.add(up);
-    const elG=new THREE.Group(); elG.position.y=-0.5; sh.add(elG);
-    const fo=limb(0.15,0.46,cfg.skin); elG.add(fo);
-    const fist=new THREE.Mesh(new THREE.SphereGeometry(0.115,10,10), skinMat); fist.position.y=-0.5; fist.castShadow=true; elG.add(fist);
-    // claws (beast)
-    const claws=new THREE.Group(); claws.visible=false; elG.add(claws);
-    for(let i=-1;i<=1;i++){ const cl=new THREE.Mesh(new THREE.ConeGeometry(0.028,0.17,6), new THREE.MeshBasicMaterial({ color:0xf8fafc }));
-      cl.position.set(i*0.055,-0.58,0.03); cl.rotation.x=Math.PI; claws.add(cl); }
-    return { sh, el:elG, fist, claws };
+  const bones={};
+  for(const n of ['Hips','Spine','Spine1','Head','RightArm','RightForeArm','RightHand','LeftArm','LeftForeArm','LeftHand','RightUpLeg','RightLeg','LeftUpLeg','LeftLeg']){
+    bones[n]=model.getObjectByName('mixamorig:'+n);
   }
-  J.armN=makeArm(0.27); J.armF=makeArm(-0.27);
-  // legs
-  function makeLeg(sideZ){
-    const hip=new THREE.Group(); hip.position.set(0,-0.05,sideZ); hips.add(hip);
-    const th=limb(0.21,0.52,cfg.cloth); hip.add(th);
-    const knee=new THREE.Group(); knee.position.y=-0.52; hip.add(knee);
-    const sh2=limb(0.18,0.5,cfg.skin); knee.add(sh2);
-    const foot=new THREE.Mesh(new THREE.BoxGeometry(0.17,0.1,0.3), new THREE.MeshStandardMaterial({ color:0x22202a, roughness:0.9 }));
-    foot.position.set(0.05,-0.52,0); foot.castShadow=true; knee.add(foot);
-    return { hip, knee };
-  }
-  J.legN=makeLeg(0.14); J.legF=makeLeg(-0.14);
-  // tail (beast)
-  const tailG=new THREE.Group(); tailG.position.set(-0.2,0.1,-0.05); hips.add(tailG);
-  const tail=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.02,0.7,8), furMat);
-  tail.position.y=-0.3; tail.rotation.z=0.7; tailG.add(tail); tailG.visible=false;
-  J.tailG=tailG;
+  // attachments (scene-level followers, positioned from bones each frame)
+  const beastHead=makeBeastHead(cfg.beastFur); scene.add(beastHead);
+  const clawR=makeClaws(); scene.add(clawR);
+  const clawL=makeClaws(); scene.add(clawL);
+  const tailG=new THREE.Group();
+  const tailMat=new THREE.MeshStandardMaterial({ color:cfg.beastFur, roughness:0.95 });
+  const tail=new THREE.Mesh(new THREE.CylinderGeometry(0.045,0.015,0.75,8), tailMat);
+  tail.position.set(0,-0.18,-0.3); tail.rotation.x=1.05; tailG.add(tail);
+  tailG.visible=false; scene.add(tailG);
+  const emblem=new THREE.Mesh(new THREE.OctahedronGeometry(0.085),
+    new THREE.MeshStandardMaterial({ color:0x111111, emissive:cfg.cloth, emissiveIntensity:2.4, roughness:0.3 }));
+  scene.add(emblem);
   root.scale.setScalar(cfg.scale||1);
   scene.add(root);
-  return { root, body, J, beastHead, chestFur, tailG, cfg,
+  const view={ root, body, model, mixer, actions, bones, beastHead, clawR, clawL, tailG, emblem, cfg,
+    curClip:null,
+    setClip(name, fade=0.18){
+      if(this.curClip===name) return;
+      const next=this.actions[name]; if(!next) return;
+      const prev=this.curClip? this.actions[this.curClip] : null;
+      next.enabled=true; next.reset(); next.setEffectiveWeight(1); next.fadeIn(fade); next.play();
+      if(prev && prev!==next) prev.fadeOut(fade);
+      this.curClip=name;
+    },
     setBeast(on){
-      this.beastHead.visible=on; this.chestFur.visible=on; this.tailG.visible=on;
-      J.armN.claws.visible=on; J.armF.claws.visible=on;
-      skull.visible=!on; hair.visible=!on;
-      root.scale.setScalar((cfg.scale||1)*(on?1.13:1));
-    } };
+      this.beastHead.visible=on; this.clawR.visible=on; this.clawL.visible=on; this.tailG.visible=on;
+      if(bodyMat) bodyMat.color.setHex(on? cfg.beastFur : cfg.tint);
+      if(jointMat){ jointMat.color.setHex(cfg.joint); if(on) jointMat.color.multiplyScalar(0.55); }
+      root.scale.setScalar((cfg.scale||1)*(on?1.12:1));
+    },
+    dispose(){
+      scene.remove(root); scene.remove(beastHead); scene.remove(clawR); scene.remove(clawL); scene.remove(tailG); scene.remove(emblem);
+      mixer.stopAllAction();
+    }
+  };
+  view.setClip('idle', 0);
+  return view;
 }
 
 /* ============ AUDIO ============ */
@@ -410,11 +446,11 @@ const ATTACKS={
   specialH:{ dur:0.52, hitT:[0.20,0.32], range:2.5,  dmg:13, push:2.6, kbT:0.42, dash:8 },
   specialB:{ dur:0.74, hits:[0.13,0.33,0.53], range:1.9, dmg:6, push:0.7, kbT:0.2, step:2.6 },
 };
-const PLAYER_CFG={ name:'FANG', sub:'NGƯỜI SÓI', skin:0xd9a066, hair:0x2b2b30, cloth:0x2563eb, beastFur:0x8a93a6, hp:110, dmgMul:1, spd:3.6, scale:1 };
+const PLAYER_CFG={ name:'FANG', sub:'NGƯỜI SÓI', skin:0xd9a066, hair:0x2b2b30, cloth:0x2563eb, beastFur:0x8a93a6, tint:0xaebfd0, joint:0x2563eb, hp:110, dmgMul:1, spd:3.6, scale:1 };
 const LADDER=[
-  { name:'KHAN', sub:'HỔ',        skin:0xc98a4b, hair:0x1c1410, cloth:0xdc2626, beastFur:0xe07b26, hp:100, dmgMul:0.95, spd:3.4, scale:1,    aggro:0.55 },
-  { name:'KURO', sub:'BÁO ĐEN',    skin:0x8a6a4a, hair:0x0c0c10, cloth:0x7c3aed, beastFur:0x23222e, hp:95,  dmgMul:1.0,  spd:4.1, scale:0.97, aggro:0.75 },
-  { name:'BRUNO', sub:'GẤU',       skin:0xa87a52, hair:0x2e1c10, cloth:0x92400e, beastFur:0x6b4423, hp:150, dmgMul:1.18, spd:3.0, scale:1.16, aggro:0.62 },
+  { name:'KHAN', sub:'HỔ',        skin:0xc98a4b, hair:0x1c1410, cloth:0xdc2626, beastFur:0xe07b26, tint:0xd9b48c, joint:0x991b1b, hp:100, dmgMul:0.95, spd:3.4, scale:1,    aggro:0.55 },
+  { name:'KURO', sub:'BÁO ĐEN',    skin:0x8a6a4a, hair:0x0c0c10, cloth:0x7c3aed, beastFur:0x23222e, tint:0x9aa0ad, joint:0x5b21b6, hp:95,  dmgMul:1.0,  spd:4.1, scale:0.97, aggro:0.75 },
+  { name:'BRUNO', sub:'GẤU',       skin:0xa87a52, hair:0x2e1c10, cloth:0x92400e, beastFur:0x6b4423, tint:0xbfa07c, joint:0x78350f, hp:150, dmgMul:1.18, spd:3.0, scale:1.16, aggro:0.62 },
 ];
 let matchIdx=0, difficulty=1, roundNum=1, gameState='menu', timeScale=1, shake=0, slowT=0, hitstopT=0;
 let P=null, E=null;
@@ -432,7 +468,7 @@ function resetFighter(f, x, face, keepWins){
   if(f.beast){ f.beast=false; f.view.setBeast(false); }
   f.gauge=Math.min(f.gauge,40);
   f.view.root.position.set(x,0,0); f.view.root.rotation.set(0,0,0);
-  f.view.body.rotation.set(0,0,0);
+  f.view.body.rotation.set(0,0,0); f.view.model.rotation.set(0,0,0);
 }
 
 /* ============ PARTICLES / FLOATERS ============ */
@@ -528,63 +564,90 @@ function updateAction(f, foe, dt){
   if(f.actionT>=A.dur) f.action=null;
 }
 
-/* ============ POSES (procedural animation) ============ */
-function ap(obj, prop, target, l, dt){ obj[prop]=THREE.MathUtils.damp(obj[prop], target, l, dt); }
+/* ============ POSES (mocap clips + bone overrides after mixer) ============ */
+const _v=new THREE.Vector3(), _q=new THREE.Quaternion(), _v2=new THREE.Vector3();
+function env01(x){ return THREE.MathUtils.clamp(x,0,1); }
+function strikeEnv(at, a, b, c, d){ // up a->b, hold, down c->d
+  if(at<a||at>d) return 0;
+  if(at<b) return env01((at-a)/(b-a));
+  if(at<c) return 1;
+  return 1-env01((at-c)/(d-c));
+}
+function followPart(part, bone, off){
+  if(!bone) return;
+  bone.getWorldPosition(_v); bone.getWorldQuaternion(_q);
+  _v2.copy(off).applyQuaternion(_q);
+  part.position.copy(_v).add(_v2);
+  part.quaternion.copy(_q);
+}
 function poseFighter(f, dt, t){
-  const J=f.view.J, V=f.view;
-  const T={ shN:0.78, elN:0.72, shF:0.55, elF:0.9, hipN:0.24, kneeN:-0.32, hipF:-0.27, kneeF:0.22,
-            torso:-0.07, head:0.04, bodyY:Math.sin(t*2.6+f.phase)*0.035, bodyZ:0, tailZ:0.5+Math.sin(t*3.1+f.phase)*0.18 };
-  if(f.beast){ T.shN=0.98; T.elN=0.5; T.torso=-0.24; T.head=0.16; T.hipN=0.32; T.kneeN=-0.44; T.hipF=-0.36; T.kneeF=0.32; }
-  const busy = !!f.action || f.hitT>0;
-  if(f.moveDir!==0 && !busy && f.y===0){
-    const ph=f.walkPhase;
-    T.hipN=Math.sin(ph)*0.6; T.kneeN=Math.max(0,-Math.sin(ph))*0.75-0.08;
-    T.hipF=Math.sin(ph+Math.PI)*0.6; T.kneeF=Math.max(0,-Math.sin(ph+Math.PI))*0.75-0.08;
-    T.shN+=Math.sin(ph)*0.14; T.shF-=Math.sin(ph)*0.14; T.bodyY=Math.abs(Math.sin(ph))*0.05;
+  const V=f.view, B=V.bones;
+  // --- choose base mocap clip ---
+  let clip='idle';
+  if(f.dead) clip='idle';
+  else if(gameState==='matchEnd' && f.wins>=2) clip='agree';
+  else if(!f.action && f.hitT<=0 && f.moveDir!==0 && f.y===0) clip = f.beast? 'run' : 'walk';
+  V.setClip(clip);
+  V.mixer.update(dt*(f.dead?0.25:1));
+  // --- root / fall transforms ---
+  V.root.position.x=f.x;
+  V.root.rotation.y = f.face>0? Math.PI/2 : -Math.PI/2;
+  const fallT = f.dead? -1.32 : 0;
+  V.body.rotation.x = THREE.MathUtils.damp(V.body.rotation.x, fallT, 6, dt);
+  V.body.position.y = f.y + (f.dead? 0.1 : 0);
+  V.model.rotation.x = THREE.MathUtils.damp(V.model.rotation.x, f.beast? 0.14 : 0, 6, dt);
+  // --- bone overrides (applied AFTER mixer, per animation skill) ---
+  const ov=(bone,axis,val)=>{ if(bone) bone.rotation[axis]+=val; };
+  const busy=!!f.action;
+  if(f.blocking && !busy){
+    ov(B.RightForeArm,'y',-1.15); ov(B.LeftForeArm,'y',1.15);
+    ov(B.RightArm,'y',-0.35); ov(B.LeftArm,'y',0.35);
   }
-  if(f.y>0.03){ T.hipN=0.6; T.kneeN=-0.75; T.hipF=-0.4; T.kneeF=0.5; T.shN=1.7; T.elN=0.4; T.shF=1.3; T.elF=0.5; }
-  if(f.blocking && !busy){ T.shN=1.08; T.elN=0.22; T.shF=0.98; T.elF=0.28; T.torso=-0.14; }
   if(f.hitT>0){
-    const k=Math.min(1, f.hitT*4);
-    T.torso=-0.07-0.4*k; T.head=-0.34*k; T.shN=0.25; T.elN=0.35; T.shF=0.15; T.elF=0.45; T.bodyY=0;
+    const k=Math.min(1,f.hitT*4.2);
+    ov(B.Spine,'x',-0.16*k); ov(B.Head,'x',-0.3*k);
+    V.model.rotation.x -= 0.14*k;
+  }
+  if(f.beast && !busy && f.hitT<=0){ // beast guard: forearms raised, claws out
+    ov(B.RightForeArm,'y',-0.55); ov(B.LeftForeArm,'y',0.55);
   }
   if(f.action){
-    const at=f.actionT, A=ATTACKS[f.action];
-    const wind=(a,b)=>THREE.MathUtils.smoothstep(at,a,b), back=(a,b)=>1-THREE.MathUtils.smoothstep(at,a,b);
-    if(f.action==='light'){ const s=wind(0.08,0.15)*back(0.2,0.34); T.shN=0.78+ (1.55-0.78)*s; T.elN=0.72*(1-s)+0.04*s; T.torso=-0.07-0.16*s; }
-    else if(f.action==='heavy'){ const s=wind(0.2,0.3)*back(0.38,0.56); T.hipN=0.24+(1.5-0.24)*s; T.kneeN=-0.32*(1-s)-0.02*s; T.torso=-0.07+0.3*s; T.shN=0.4; T.shF=1.1; }
-    else if(f.action==='specialH'){ const s=wind(0.16,0.26)*back(0.34,0.52); T.shN=0.78+(1.7-0.78)*s; T.elN=0.05; T.shF=0.55+(1.5-0.55)*s; T.elF=0.1; T.torso=-0.07-0.3*s; T.hipN=0.5; T.hipF=-0.5; }
-    else if(f.action==='specialB'){
-      const ph=Math.floor(at/0.2)%2===0;
-      const s1=wind(0.06,0.16)*back(0.2,0.3), s2=wind(0.26,0.36)*back(0.4,0.5), s3=wind(0.46,0.56)*back(0.6,0.74);
-      if(ph||true){ T.shN=0.98+(1.8-0.98)*Math.max(s1,s3); T.elN=0.06; }
-      T.shF=0.55+(1.8-0.55)*s2; T.elF=0.06;
-      T.torso=-0.24-0.2*Math.max(s1,s2,s3); V.body.rotation.y = Math.sin(at*22)*0.14;
-    }
-    else if(f.action==='transform'){
-      const s=Math.sin(Math.min(at/0.85,1)*Math.PI);
-      T.shN=0.78+1.9*s; T.shF=0.55+1.9*s; T.elN=0.3; T.elF=0.3; T.torso=-0.07-0.25*s; T.head=-0.3*s; T.bodyY=-0.12*s;
-      if(at>0.8) V.body.rotation.y=0;
+    const at=f.actionT;
+    if(f.action==='light'){
+      const e=strikeEnv(at,0.07,0.13,0.17,0.3);
+      ov(B.RightArm,'y',-1.5*e); ov(B.RightForeArm,'y',-0.25*e); ov(B.Spine,'y',-0.35*e); ov(B.Spine,'x',0.1*e);
+    } else if(f.action==='heavy'){
+      const wind=env01((at-0.02)/0.2), e=strikeEnv(at,0.2,0.3,0.36,0.54);
+      ov(B.RightUpLeg,'x',0.35*wind*(1-e)); // chamber knee back-ish
+      ov(B.RightUpLeg,'x',-1.25*e); ov(B.RightLeg,'x',(0.95-0.85*Math.max(0,(at-0.26)/0.1))*e);
+      ov(B.Spine,'y',0.3*e); ov(B.LeftArm,'y',0.7*e);
+    } else if(f.action==='specialH'){
+      const e=strikeEnv(at,0.16,0.25,0.32,0.5);
+      ov(B.RightArm,'y',-1.6*e); ov(B.LeftArm,'y',-1.1*e); ov(B.RightForeArm,'y',-0.2*e); ov(B.LeftForeArm,'y',-0.2*e);
+      ov(B.Spine,'y',-0.5*e); ov(B.Spine,'x',0.14*e);
+    } else if(f.action==='specialB'){
+      const s1=strikeEnv(at,0.05,0.13,0.17,0.26), s2=strikeEnv(at,0.25,0.33,0.37,0.46), s3=strikeEnv(at,0.45,0.54,0.6,0.72);
+      ov(B.RightArm,'y',-1.7*Math.max(s1,s3)); ov(B.RightForeArm,'y',-0.2*Math.max(s1,s3));
+      ov(B.LeftArm,'y',-1.7*s2); ov(B.LeftForeArm,'y',-0.2*s2);
+      ov(B.Spine,'y',(-0.4*s1+0.4*s2-0.45*s3)); ov(B.Spine,'x',0.16*Math.max(s1,s2,s3));
+      V.model.rotation.y = Math.sin(at*20)*0.16;
+    } else if(f.action==='transform'){
+      const e=Math.sin(Math.min(at/0.85,1)*Math.PI);
+      ov(B.RightArm,'z',2.0*e); ov(B.LeftArm,'z',-2.0*e);
+      ov(B.Head,'x',-0.34*e); ov(B.Spine,'x',-0.14*e);
     }
   }
-  if(f.dead){ T.shN=0.2; T.elN=0.1; T.shF=0.2; T.elF=0.1; T.hipN=0.15; T.kneeN=-0.2; T.hipF=-0.1; T.kneeF=0.15; T.torso=0; T.head=0.2; }
-  if(gameState==='matchEnd' && f.wins>=2 && !f.dead){ T.shN=2.7; T.shF=2.5; T.elN=0.2; T.elF=0.2; T.bodyY=Math.abs(Math.sin(t*5))*0.14; }
-  const L=26;
-  ap(J.armN.sh.rotation,'z',T.shN,L,dt); ap(J.armN.el.rotation,'z',T.elN,L,dt);
-  ap(J.armF.sh.rotation,'z',T.shF,L,dt); ap(J.armF.el.rotation,'z',T.elF,L,dt);
-  ap(J.legN.hip.rotation,'z',T.hipN,L,dt); ap(J.legN.knee.rotation,'z',T.kneeN,L,dt);
-  ap(J.legF.hip.rotation,'z',T.hipF,L,dt); ap(J.legF.knee.rotation,'z',T.kneeF,L,dt);
-  ap(J.torso.rotation,'z',T.torso,18,dt); ap(J.head.rotation,'z',T.head,18,dt);
-  ap(J.tailG.rotation,'z',T.tailZ,8,dt);
-  V.body.position.y = T.bodyY + f.y;
-  V.body.rotation.z = f.dead? 0 : (f.hitT>0? -0.12*f.hitDir : 0);
-  if(f.action!=='specialB' && f.action!=='transform') V.body.rotation.y = THREE.MathUtils.damp(V.body.rotation.y, 0, 14, dt);
-  // root transform: position + fall over when dead
-  V.root.position.x=f.x;
-  const targetRotZ = f.dead? -f.hitDir*1.45 : 0;
-  V.root.rotation.z = THREE.MathUtils.damp(V.root.rotation.z, targetRotZ, 7, dt);
-  V.root.rotation.y = f.face>0? 0 : Math.PI;
-  V.root.position.y = f.dead? 0.12 : 0;
+  if(f.action!=='specialB') V.model.rotation.y = THREE.MathUtils.damp(V.model.rotation.y, 0, 12, dt);
+  // --- attachments follow bones ---
+  V.model.updateMatrixWorld(true);
+  if(V.beastHead.visible) followPart(V.beastHead, B.Head, _v2.set(0,0.1,0.04));
+  if(V.clawR.visible) followPart(V.clawR, B.RightHand, _v2.set(0,0.02,0.02));
+  if(V.clawL.visible) followPart(V.clawL, B.LeftHand, _v2.set(0,0.02,0.02));
+  if(V.tailG.visible){
+    followPart(V.tailG, B.Hips, _v2.set(0,0.02,-0.05));
+    V.tailG.rotateY(Math.sin(t*3.4+f.phase)*0.3);
+  }
+  followPart(V.emblem, B.Spine1, _v2.set(0,0.06,0.26));
 }
 
 /* ============ AI ============ */
@@ -662,7 +725,7 @@ function renderLadder(el){
 }
 function startMatch(idx){
   matchIdx=idx;
-  if(P){ scene.remove(P.view.root); scene.remove(E.view.root); }
+  if(P){ P.view.dispose(); E.view.dispose(); }
   P=makeCombatant(PLAYER_CFG, true);
   E=makeCombatant(LADDER[idx], false);
   P.wins=0; E.wins=0; roundNum=1;
@@ -769,6 +832,7 @@ document.querySelectorAll('[data-act]').forEach(b=>{
 
 /* ============ BUTTONS ============ */
 function beginGame(diff){
+  if(!assetsReady) return;
   difficulty=diff;
   $('startScreen').style.display='none'; $('endScreen').style.display='none';
   $('hud').style.display='block'; $('touch').classList.add('on');
@@ -779,9 +843,17 @@ $('startHard').onclick=()=>beginGame(2);
 $('nextBtn').onclick=()=>{ $('endScreen').style.display='none'; startMusic(); startMatch(lastWin? Math.min(matchIdx+1, LADDER.length-1) : matchIdx); };
 $('retryBtn').onclick=()=>{ $('endScreen').style.display='none'; startMusic(); startMatch(0); };
 
-/* menu backdrop fighters */
-P=makeCombatant(PLAYER_CFG, true); E=makeCombatant(LADDER[0], false);
-resetFighter(P,-2.2,1); resetFighter(E,2.2,-1);
+/* menu backdrop fighters (after the model finishes loading) */
+let assetsReady=false;
+$('startNormal').textContent='⏳ ĐANG TẢI VÕ SĨ...';
+$('startHard').textContent='⏳';
+loadFighterAssets().then(()=>{
+  assetsReady=true;
+  P=makeCombatant(PLAYER_CFG, true); E=makeCombatant(LADDER[0], false);
+  resetFighter(P,-2.2,1); resetFighter(E,2.2,-1);
+  $('startNormal').innerHTML='⚔️ &nbsp;ĐẤU THƯỜNG';
+  $('startHard').innerHTML='🔥 &nbsp;ĐẤU KHÓ';
+}).catch(err=>{ console.error('Model load failed', err); $('startNormal').textContent='LỖI TẢI MODEL — TẢI LẠI TRANG'; });
 renderLadder($('ladder'));
 
 /* ============ MAIN LOOP ============ */
@@ -828,6 +900,15 @@ function animate(){
   }
   // torch flicker
   flames.forEach((fl,i)=>{ fl.scale.set(1+Math.sin(t*13+i*2)*0.12, 1+Math.sin(t*17+i*3.7)*0.22, 1); fl.rotation.y=t*2+i; });
+  { const pos=emberGeo.attributes.position;
+    for(let i=0;i<EMBERS;i++){ const b=emberBase[i];
+      pos.array[i*3]   = b.x + Math.sin(t*0.7+b.ph)*0.5;
+      pos.array[i*3+1] = (b.y + t*b.sp) % 7.5;
+      pos.array[i*3+2] = b.z;
+    }
+    pos.needsUpdate=true;
+  }
+  skyDome.position.x = camera.position.x;
   // camera
   shake=Math.max(0, shake-rawDt*1.7);
   const mid=P&&E? (P.x+E.x)/2 : 0;
