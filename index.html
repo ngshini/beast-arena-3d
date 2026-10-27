@@ -1319,7 +1319,21 @@ loadModel('models/Xbot.glb').then(()=>{
     // single-screen lobby: arena + roster bar, tap a fighter to start
     $('startScreen').style.display='none';
     $('lobbyHint').style.display='block';
+    initLobby();
   }
+
+/* Lobby face-off: two fighters idle in the arena from page load, so the scene
+   is never empty. startMatch disposes and rebuilds them when a match begins. */
+async function initLobby(){
+  try{
+    await loadModel(ROSTER[1].file);
+    await loadModel(ROSTER[2].file);
+    if(gameState!=='menu' || P) return;
+    P=makeCombatant({...ROSTER[1]}, true);
+    E=makeCombatant({...ROSTER[2]}, false);
+    resetFighter(P,-2.4,1); resetFighter(E,2.4,-1);
+  }catch(err){ console.error('Lobby load failed', err); }
+}
 }).catch(err=>{ console.error('Model load failed', err); $('startNormal').textContent='LỖI TẢI MODEL — TẢI LẠI TRANG'; });
 
 /* ============ MAIN LOOP ============ */
