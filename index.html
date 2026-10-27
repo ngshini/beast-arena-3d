@@ -94,6 +94,31 @@
   #loadOverlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(5,2,16,.72);z-index:40;
     font-size:20px;font-weight:800;letter-spacing:2px;color:#ffd34d;text-shadow:0 0 14px rgba(255,170,0,.6)}
 </style>
+<style>
+  #charBar{position:fixed;left:50%;transform:translateX(-50%);bottom:10px;z-index:9;display:none;align-items:center;gap:6px;
+    background:rgba(10,6,28,.88);border:1px solid rgba(255,211,77,.35);border-radius:16px;padding:7px 9px;max-width:97vw;overflow-x:auto}
+  #charBar .cbLabel{font-size:11px;font-weight:800;color:#ffd34d;letter-spacing:1px;white-space:nowrap}
+  .chip{cursor:pointer;border:2px solid rgba(255,255,255,.16);background:rgba(255,255,255,.05);border-radius:12px;padding:4px 7px 3px;
+    text-align:center;min-width:57px;transition:border-color .12s,transform .12s;flex:0 0 auto}
+  .chip:hover{transform:translateY(-2px)}
+  .chip .ci{font-size:21px;line-height:1.05}
+  .chip .cn{font-size:9.5px;font-weight:800;letter-spacing:.4px;color:#e8defc;white-space:nowrap}
+  .chip.active{border-color:#ffd34d;background:rgba(255,211,77,.16)}
+  .cbSep{width:1px;align-self:stretch;background:rgba(255,255,255,.18);margin:2px 1px}
+  .dchip{cursor:pointer;border:1px solid rgba(255,255,255,.22);background:transparent;color:#cdbcf5;border-radius:999px;
+    font-size:11px;font-weight:800;padding:6px 9px;white-space:nowrap}
+  .dchip.active{background:#ffd34d;color:#241203;border-color:#ffd34d}
+  #lobbyHint{position:fixed;left:50%;transform:translateX(-50%);bottom:86px;z-index:9;display:none;pointer-events:none;
+    background:rgba(10,6,28,.82);border:1px solid rgba(255,211,77,.4);color:#ffe9a8;border-radius:999px;padding:8px 16px;
+    font-size:13.5px;font-weight:700;white-space:nowrap;max-width:96vw;overflow:hidden;text-overflow:ellipsis}
+  @media (pointer:coarse){ #charBar{bottom:84px} #lobbyHint{bottom:160px} }
+  /* result panel: compact bar on the same screen instead of a full-screen takeover */
+  #endScreen{inset:auto;left:50%;transform:translateX(-50%);bottom:96px;top:auto;width:min(560px,94vw);
+    border-radius:18px;border:1px solid rgba(255,211,77,.45);background:rgba(8,4,24,.93);padding:16px 14px;z-index:11}
+  @media (pointer:coarse){ #endScreen{bottom:172px} }
+  #endScreen .logo{font-size:clamp(22px,4.5vw,34px)}
+  #changeBtn{display:none}
+</style>
 </head>
 <body>
 <div id="game"></div>
@@ -164,6 +189,8 @@
   <div id="selTip"></div>
 </div>
 <div id="loadOverlay">⏳ &nbsp;ĐANG TẢI TRẬN ĐẤU...</div>
+<div id="lobbyHint">👆 Chạm vào 1 võ sĩ ở thanh dưới để chọn và đấu ngay</div>
+<div id="charBar"></div>
 
 <div id="touch">
   <div class="tgrp">
@@ -998,11 +1025,39 @@ function buildSelectCards(){
     grid.appendChild(card);
   });
 }
+function buildCharBar(){
+  const bar=$('charBar'); bar.innerHTML='';
+  const lb=document.createElement('div'); lb.className='cbLabel'; lb.textContent='VÕ SĨ:'; bar.appendChild(lb);
+  ROSTER.forEach(cfg=>{
+    const chip=document.createElement('div');
+    chip.className='chip'; chip.dataset.charId=cfg.id;
+    chip.innerHTML=`<div class="ci">${cfg.icon}</div><div class="cn" style="color:${cfg.accent}">${cfg.name}</div>`;
+    chip.title=cfg.name+' · '+cfg.sub+' — '+cfg.style;
+    chip.onclick=()=>pickCharacter(cfg);
+    bar.appendChild(chip);
+  });
+  const sep=document.createElement('div'); sep.className='cbSep'; bar.appendChild(sep);
+  [[1,'THƯỜNG'],[2,'KHÓ']].forEach(([d,label])=>{
+    const b=document.createElement('button');
+    b.className='dchip'; b.dataset.diff=d; b.textContent=label;
+    b.onclick=()=>{ difficulty=d; syncCharBar(); };
+    bar.appendChild(b);
+  });
+  bar.style.display='flex';
+  syncCharBar();
+}
+function syncCharBar(){
+  document.querySelectorAll('#charBar .chip').forEach(ch=>ch.classList.toggle('active', ch.dataset.charId===playerCfg.id));
+  document.querySelectorAll('#charBar .dchip').forEach(b=>b.classList.toggle('active', +b.dataset.diff===difficulty));
+}
 async function pickCharacter(cfg){
   playerCfg=cfg;
   buildMatchCfgs();
-  $('selTip').textContent='Đang chuẩn bị trận đấu với '+cfg.name+'...';
+  syncCharBar();
+  $('lobbyHint').style.display='none';
   $('selectScreen').style.display='none';
+  $('endScreen').style.display='none';
+  $('startScreen').style.display='none';
   gameState='intro';
   startMusic();
   await startMatch(0);
@@ -1038,6 +1093,7 @@ loadModel('models/Xbot.glb').then(()=>{
     const d=document.createElement('div'); d.className='rung';
     d.textContent=c.icon+' '+c.name+' · '+c.sub; el.appendChild(d);
   });
+  buildCharBar();
   // deep link ?char=<id>: pick that fighter and start fighting immediately
   const qs=new URLSearchParams(location.search);
   const rc=ROSTER.find(c=>c.id===qs.get('char'));
@@ -1045,6 +1101,10 @@ loadModel('models/Xbot.glb').then(()=>{
     difficulty = qs.get('diff')==='2'? 2 : 1;
     $('startScreen').style.display='none';
     pickCharacter(rc);
+  } else {
+    // single-screen lobby: arena + roster bar, tap a fighter to start
+    $('startScreen').style.display='none';
+    $('lobbyHint').style.display='block';
   }
 }).catch(err=>{ console.error('Model load failed', err); $('startNormal').textContent='LỖI TẢI MODEL — TẢI LẠI TRANG'; });
 
