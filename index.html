@@ -1038,6 +1038,14 @@ loadModel('models/Xbot.glb').then(()=>{
     const d=document.createElement('div'); d.className='rung';
     d.textContent=c.icon+' '+c.name+' · '+c.sub; el.appendChild(d);
   });
+  // deep link ?char=<id>: pick that fighter and start fighting immediately
+  const qs=new URLSearchParams(location.search);
+  const rc=ROSTER.find(c=>c.id===qs.get('char'));
+  if(rc){
+    difficulty = qs.get('diff')==='2'? 2 : 1;
+    $('startScreen').style.display='none';
+    pickCharacter(rc);
+  }
 }).catch(err=>{ console.error('Model load failed', err); $('startNormal').textContent='LỖI TẢI MODEL — TẢI LẠI TRANG'; });
 
 /* ============ MAIN LOOP ============ */
