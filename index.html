@@ -77,6 +77,23 @@
   .tbtn.beast{border-color:#f59e0b;color:#fcd34d}
   @media (pointer:coarse){#touch.on{display:flex}}
 </style>
+<style>
+  #selectScreen{display:none}
+  #selGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;max-width:860px;width:94vw;margin-top:14px}
+  .selCard{cursor:pointer;background:rgba(16,10,40,.88);border:2px solid rgba(255,255,255,.14);border-radius:14px;padding:12px 10px 10px;text-align:center;transition:transform .12s,border-color .12s}
+  .selCard:hover{transform:translateY(-3px) scale(1.02)}
+  .selCard .ic{font-size:40px;line-height:1.1}
+  .selCard .nm{font-weight:800;font-size:17px;letter-spacing:1px;margin-top:4px}
+  .selCard .sb{font-size:11px;color:#b7a8e8;letter-spacing:.5px}
+  .selCard .st{font-size:11.5px;color:#e8defc;margin:6px 0 8px;min-height:28px}
+  .selCard .barRow{display:flex;align-items:center;gap:6px;font-size:10px;color:#9d8fd0;margin-top:3px}
+  .selCard .barRow span{width:30px;text-align:left}
+  .selCard .bar{flex:1;height:6px;background:rgba(255,255,255,.12);border-radius:3px;overflow:hidden}
+  .selCard .bar i{display:block;height:100%;border-radius:3px}
+  #selTip{margin-top:12px;font-size:13px;color:#cdbcf5}
+  #loadOverlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(5,2,16,.72);z-index:40;
+    font-size:20px;font-weight:800;letter-spacing:2px;color:#ffd34d;text-shadow:0 0 14px rgba(255,170,0,.6)}
+</style>
 </head>
 <body>
 <div id="game"></div>
@@ -111,17 +128,17 @@
 
 <div class="screen" id="startScreen">
   <div class="logo">ĐẤU TRƯỜNG THÚ 3D</div>
-  <div class="logo-sub">Beast Arena · Biến hình · Leo tháp 3 đối thủ</div>
+  <div class="logo-sub">Beast Arena · 7 võ sĩ · Chọn nhân vật · Leo tháp 3 đối thủ</div>
   <div id="ladder"></div>
   <div class="card">
     <h3>Cách đánh</h3>
     <div class="keys">
       <div><b>Di chuyển</b> <kbd>A</kbd> <kbd>D</kbd> · <b>Nhảy</b> <kbd>W</kbd></div>
       <div><b>Đấm nhanh</b> <kbd>J</kbd> · <b>Đá mạnh</b> <kbd>K</kbd></div>
-      <div><b>Tuyệt chiêu</b> <kbd>L</kbd> (hình thú: vuốt xé 3 nhát)</div>
+      <div><b>Tuyệt chiêu</b> <kbd>L</kbd> (khi cuồng nộ: combo 3 nhát)</div>
       <div><b>Đỡ đòn</b> giữ <kbd>S</kbd> · <b>Biến hình</b> <kbd>R</kbd></div>
     </div>
-    <div class="tip">🐺 Đánh trúng và chịu đòn đều nạp <b>Thanh Thú</b>. Đầy thanh → bấm <b>R</b> biến thành thú: to hơn, nhanh hơn, đòn mạnh hơn +35%, có vuốt xé. Ở hình thú, trúng đòn sẽ hao thanh nhanh — hết thanh thì trở lại người.<br>🏆 Thắng 2 hiệp là thắng trận. Hạ đủ 3 đối thủ (Hổ → Báo đen → Gấu) để thành nhà vô địch!</div>
+    <div class="tip">🐺 Đánh trúng và chịu đòn đều nạp <b>Thanh Thú</b>. Đầy thanh → bấm <b>R</b> biến thành thú: to hơn, nhanh hơn, đòn mạnh hơn +35%, có vuốt xé. Ở hình thú, trúng đòn sẽ hao thanh nhanh — hết thanh thì trở lại người.<br>🏆 Thắng 2 hiệp là thắng trận. Hạ đủ 3 đối thủ bốc từ 6 võ sĩ còn lại để thành nhà vô địch!</div>
   </div>
   <div class="btnRow">
     <button class="btn gold" id="startNormal">⚔️ &nbsp;ĐẤU THƯỜNG</button>
@@ -135,9 +152,18 @@
   <div id="ladder2" style="display:flex;gap:10px;margin-top:16px;justify-content:center;flex-wrap:wrap"></div>
   <div class="btnRow">
     <button class="btn gold" id="nextBtn">▶ &nbsp;ĐẤU TIẾP</button>
+    <button class="btn" id="changeBtn">🔄 &nbsp;ĐỔI VÕ SĨ</button>
     <button class="btn" id="retryBtn">↻ &nbsp;ĐẤU LẠI TỪ ĐẦU</button>
   </div>
 </div>
+
+<div class="screen" id="selectScreen">
+  <div class="logo">CHỌN VÕ SĨ CỦA BẠN</div>
+  <div class="logo-sub">Chạm vào nhân vật muốn chơi — 3 đối thủ sẽ bốc từ 6 người còn lại</div>
+  <div id="selGrid"></div>
+  <div id="selTip"></div>
+</div>
+<div id="loadOverlay">⏳ &nbsp;ĐANG TẢI TRẬN ĐẤU...</div>
 
 <div id="touch">
   <div class="tgrp">
@@ -274,10 +300,10 @@ const embers=new THREE.Points(emberGeo, new THREE.PointsMaterial({ color:0xffa04
 scene.add(embers);
 
 /* ============ FIGHTER BUILDER (real Xbot model + beast attachments) ============ */
-let TEMPLATE=null;
-async function loadFighterAssets(){
-  const gltf=await new GLTFLoader().loadAsync('models/Xbot.glb');
-  TEMPLATE=gltf;
+const TEMPLATES={};
+async function loadModel(file){
+  if(!TEMPLATES[file]) TEMPLATES[file]=await new GLTFLoader().loadAsync(file);
+  return TEMPLATES[file];
 }
 function makeBeastHead(fur){
   const g=new THREE.Group();
@@ -307,66 +333,104 @@ function makeClaws(){
   return g;
 }
 function buildFighter(cfg){
+  const tpl=TEMPLATES[cfg.file];
   const root=new THREE.Group();          // position + facing yaw
   const body=new THREE.Group();          // jump height + KO fall (local x-rot)
   root.add(body);
-  const model=SkeletonUtils.clone(TEMPLATE.scene);
+  const model=SkeletonUtils.clone(tpl.scene);
   body.add(model);
-  // materials: clone + tint (body limbs + joint spheres)
+  // normalize to ~1.82m tall regardless of source model units
+  const bb=new THREE.Box3().setFromObject(model);
+  const hgt=bb.max.y-bb.min.y;
+  if(hgt>0.2) model.scale.setScalar(1.82/hgt);
+  const WEAPON_RE=/(Axe|Sword|Shield|Mug|Spellbook|Wand|Staff|Crossbow|Knife|Throwable)/;
   let bodyMat=null, jointMat=null;
   model.traverse(o=>{
     if(o.isMesh || o.isSkinnedMesh){
       o.castShadow=true; o.frustumCulled=false;
-      o.material=o.material.clone();
-      if(o.material.name && o.material.name.includes('Joints')){ jointMat=o.material; jointMat.color.setHex(cfg.joint); jointMat.roughness=0.5; }
-      else { bodyMat=o.material; bodyMat.color.setHex(cfg.tint); bodyMat.roughness=0.62; }
+      if(cfg.kind==='kaykit' && WEAPON_RE.test(o.name)) o.visible=false; // hide loose weapon props; fighters brawl unarmed
+      if(cfg.kind==='xbot'){
+        o.material=o.material.clone();
+        if(o.material.name && o.material.name.includes('Joints')){ jointMat=o.material; jointMat.color.setHex(cfg.joint); jointMat.roughness=0.5; }
+        else { bodyMat=o.material; bodyMat.color.setHex(cfg.tint); bodyMat.roughness=0.62; }
+      }
     }
   });
   const mixer=new THREE.AnimationMixer(model);
   const actions={};
-  for(const clip of TEMPLATE.animations){
+  for(const clip of tpl.animations){
     const a=mixer.clipAction(clip); a.enabled=false; actions[clip.name]=a;
   }
+  const isMixamo = cfg.kind==='xbot' || cfg.kind==='michelle';
   const bones={};
-  for(const n of ['Hips','Spine','Spine1','Head','RightArm','RightForeArm','RightHand','LeftArm','LeftForeArm','LeftHand','RightUpLeg','RightLeg','LeftUpLeg','LeftLeg']){
-    bones[n]=model.getObjectByName('mixamorig:'+n);
+  if(isMixamo){
+    for(const n of ['Hips','Spine','Spine1','Head','RightArm','RightForeArm','RightHand','LeftArm','LeftForeArm','LeftHand','RightUpLeg','RightLeg','LeftUpLeg','LeftLeg']){
+      bones[n]=model.getObjectByName('mixamorig:'+n);
+    }
   }
-  // attachments (scene-level followers, positioned from bones each frame)
-  const beastHead=makeBeastHead(cfg.beastFur); scene.add(beastHead);
-  const clawR=makeClaws(); scene.add(clawR);
-  const clawL=makeClaws(); scene.add(clawL);
-  const tailG=new THREE.Group();
-  const tailMat=new THREE.MeshStandardMaterial({ color:cfg.beastFur, roughness:0.95 });
-  const tail=new THREE.Mesh(new THREE.CylinderGeometry(0.045,0.015,0.75,8), tailMat);
-  tail.position.set(0,-0.18,-0.3); tail.rotation.x=1.05; tailG.add(tail);
-  tailG.visible=false; scene.add(tailG);
-  const emblem=new THREE.Mesh(new THREE.OctahedronGeometry(0.085),
-    new THREE.MeshStandardMaterial({ color:0x111111, emissive:cfg.cloth, emissiveIntensity:2.4, roughness:0.3 }));
-  scene.add(emblem);
+  // beast attachments only for Xbot (wolf form); followers positioned from bones each frame
+  let beastHead=null, clawR=null, clawL=null, tailG=null, emblem=null;
+  if(cfg.kind==='xbot'){
+    beastHead=makeBeastHead(cfg.beastFur); scene.add(beastHead);
+    clawR=makeClaws(); scene.add(clawR);
+    clawL=makeClaws(); scene.add(clawL);
+    tailG=new THREE.Group();
+    const tail=new THREE.Mesh(new THREE.CylinderGeometry(0.045,0.015,0.75,8),
+      new THREE.MeshStandardMaterial({ color:cfg.beastFur, roughness:0.95 }));
+    tail.position.set(0,-0.18,-0.3); tail.rotation.x=1.05; tailG.add(tail);
+    tailG.visible=false; scene.add(tailG);
+  }
+  if(isMixamo){
+    emblem=new THREE.Mesh(new THREE.OctahedronGeometry(0.085),
+      new THREE.MeshStandardMaterial({ color:0x111111, emissive:cfg.cloth, emissiveIntensity:2.4, roughness:0.3 }));
+    scene.add(emblem);
+  }
+  // rage aura (all characters) + block shield bubble (all characters)
+  const aura=new THREE.Group();
+  const auraMat=new THREE.MeshBasicMaterial({ color:0xff8c1a, transparent:true, opacity:0.85, blending:THREE.AdditiveBlending, depthWrite:false });
+  const auraRing=new THREE.Mesh(new THREE.TorusGeometry(0.8,0.05,10,36), auraMat);
+  auraRing.rotation.x=Math.PI/2; auraRing.position.y=0.06; aura.add(auraRing);
+  for(let i=0;i<9;i++){
+    const fl=new THREE.Mesh(new THREE.ConeGeometry(0.09,0.42,6), auraMat);
+    const aa=i/9*Math.PI*2; fl.position.set(Math.cos(aa)*0.8,0.28,Math.sin(aa)*0.8); aura.add(fl);
+  }
+  aura.visible=false; root.add(aura);
+  const shield=new THREE.Mesh(new THREE.SphereGeometry(1.04,20,16),
+    new THREE.MeshBasicMaterial({ color:0x60a5fa, transparent:true, opacity:0.20, blending:THREE.AdditiveBlending, depthWrite:false, side:THREE.DoubleSide }));
+  shield.position.y=1.0; shield.visible=false; body.add(shield);
   root.scale.setScalar(cfg.scale||1);
   scene.add(root);
-  const view={ root, body, model, mixer, actions, bones, beastHead, clawR, clawL, tailG, emblem, cfg,
+  const view={ root, body, model, mixer, actions, bones, beastHead, clawR, clawL, tailG, emblem, aura, auraRing, shield, cfg,
     curClip:null,
-    setClip(name, fade=0.18){
-      if(this.curClip===name) return;
-      const next=this.actions[name]; if(!next) return;
+    setClip(name, fade=0.18){ this.playState(name, { fade }); },
+    playState(name, opts={}){
+      const a=this.actions[name]; if(!a) return;
+      const ts=opts.ts??1;
+      if(this.curClip===name && !opts.restart){ a.timeScale=ts; return; }
       const prev=this.curClip? this.actions[this.curClip] : null;
-      next.enabled=true; next.reset(); next.setEffectiveWeight(1); next.fadeIn(fade); next.play();
-      if(prev && prev!==next) prev.fadeOut(fade);
+      const fade=opts.fade??0.15;
+      a.enabled=true; a.reset(); a.setEffectiveWeight(1); a.timeScale=ts;
+      if(opts.once){ a.setLoop(THREE.LoopOnce,1); a.clampWhenFinished=true; }
+      else { a.setLoop(THREE.LoopRepeat,Infinity); a.clampWhenFinished=false; }
+      a.fadeIn(fade); a.play();
+      if(prev && prev!==a) prev.fadeOut(fade);
       this.curClip=name;
     },
     setBeast(on){
-      this.beastHead.visible=on; this.clawR.visible=on; this.clawL.visible=on; this.tailG.visible=on;
-      if(bodyMat) bodyMat.color.setHex(on? cfg.beastFur : cfg.tint);
-      if(jointMat){ jointMat.color.setHex(cfg.joint); if(on) jointMat.color.multiplyScalar(0.55); }
-      root.scale.setScalar((cfg.scale||1)*(on?1.12:1));
+      this.aura.visible=on;
+      if(cfg.kind==='xbot'){
+        this.beastHead.visible=on; this.clawR.visible=on; this.clawL.visible=on; this.tailG.visible=on;
+        if(bodyMat) bodyMat.color.setHex(on? cfg.beastFur : cfg.tint);
+        if(jointMat){ jointMat.color.setHex(cfg.joint); if(on) jointMat.color.multiplyScalar(0.55); }
+      }
+      root.scale.setScalar((cfg.scale||1)*(on?1.1:1));
     },
     dispose(){
-      scene.remove(root); scene.remove(beastHead); scene.remove(clawR); scene.remove(clawL); scene.remove(tailG); scene.remove(emblem);
+      scene.remove(root);
+      for(const part of [this.beastHead,this.clawR,this.clawL,this.tailG,this.emblem]) if(part) scene.remove(part);
       mixer.stopAllAction();
     }
   };
-  view.setClip('idle', 0);
   return view;
 }
 
@@ -446,12 +510,47 @@ const ATTACKS={
   specialH:{ dur:0.52, hitT:[0.20,0.32], range:2.5,  dmg:13, push:2.6, kbT:0.42, dash:8 },
   specialB:{ dur:0.74, hits:[0.13,0.33,0.53], range:1.9, dmg:6, push:0.7, kbT:0.2, step:2.6 },
 };
-const PLAYER_CFG={ name:'FANG', sub:'NGƯỜI SÓI', skin:0xd9a066, hair:0x2b2b30, cloth:0x2563eb, beastFur:0x8a93a6, tint:0xaebfd0, joint:0x2563eb, hp:110, dmgMul:1, spd:3.6, scale:1 };
-const LADDER=[
-  { name:'KHAN', sub:'HỔ',        skin:0xc98a4b, hair:0x1c1410, cloth:0xdc2626, beastFur:0xe07b26, tint:0xd9b48c, joint:0x991b1b, hp:100, dmgMul:0.95, spd:3.4, scale:1,    aggro:0.55 },
-  { name:'KURO', sub:'BÁO ĐEN',    skin:0x8a6a4a, hair:0x0c0c10, cloth:0x7c3aed, beastFur:0x23222e, tint:0x9aa0ad, joint:0x5b21b6, hp:95,  dmgMul:1.0,  spd:4.1, scale:0.97, aggro:0.75 },
-  { name:'BRUNO', sub:'GẤU',       skin:0xa87a52, hair:0x2e1c10, cloth:0x92400e, beastFur:0x6b4423, tint:0xbfa07c, joint:0x78350f, hp:150, dmgMul:1.18, spd:3.0, scale:1.16, aggro:0.62 },
+const ROSTER=[
+  { id:'xbot', kind:'xbot', name:'XBOT', sub:'NGƯỜI MÁY XÁM', icon:'🧍', file:'models/Xbot.glb',
+    hp:110, dmgMul:1.0, spd:3.6, scale:1.0, accent:'#7dd3fc', style:'Cân bằng · biến hình sói thật',
+    tint:0xaebfd0, joint:0x2563eb, beastFur:0x8a93a6, cloth:0x2563eb },
+  { id:'barb', kind:'kaykit', name:'BARBARIAN', sub:'CHIẾN BINH RÌU', icon:'🪓', file:'models/KayKit-Barbarian.glb',
+    hp:126, dmgMul:1.12, spd:3.3, scale:1.05, accent:'#f97316', style:'Máu trâu · đòn nặng · chiêu xoay rìu',
+    sig:'2H_Melee_Attack_Spin', sigTs:3.0, cloth:0xf97316 },
+  { id:'knight', kind:'kaykit', name:'KNIGHT', sub:'HIỆP SĨ GIÁP SẮT', icon:'⚔️', file:'models/KayKit-Knight.glb',
+    hp:118, dmgMul:1.05, spd:3.4, scale:1.02, accent:'#e2e8f0', style:'Cân bằng · chiêu chém kiếm',
+    sig:'1H_Melee_Attack_Slice_Horizontal', sigTs:1.5, cloth:0x94a3b8 },
+  { id:'mage', kind:'kaykit', name:'MAGE', sub:'PHÁP SƯ', icon:'🔮', file:'models/KayKit-Mage.glb',
+    hp:92, dmgMul:1.08, spd:3.5, scale:1.0, accent:'#a78bfa', style:'Máu mỏng · chiêu bắn phép',
+    sig:'Spellcast_Shoot', sigTs:1.5, cloth:0x7c3aed },
+  { id:'rogue', kind:'kaykit', name:'ROGUE', sub:'SÁT THỦ SONG KIẾM', icon:'🗡️', file:'models/KayKit-Rogue.glb',
+    hp:95, dmgMul:0.96, spd:4.2, scale:0.98, accent:'#34d399', style:'Nhanh nhất · chiêu song kiếm',
+    sig:'Dualwield_Melee_Attack_Slice', sigTs:1.4, cloth:0x059669 },
+  { id:'robot', kind:'robot', name:'ROBOT', sub:'ROBOT VUI NHỘN', icon:'🤖', file:'models/RobotExpressive.glb',
+    hp:105, dmgMul:1.0, spd:3.5, scale:1.0, accent:'#facc15', style:'Đấm móc thật · thắng là nhảy múa',
+    cloth:0xfacc15 },
+  { id:'michelle', kind:'michelle', name:'MICHELLE', sub:'NỮ HOÀNG SAMBA', icon:'💃', file:'models/Michelle.glb',
+    hp:100, dmgMul:0.94, spd:3.8, scale:1.0, accent:'#f472b6', style:'Nhân vật troll · vừa nhảy vừa đánh',
+    tint:0xffffff, joint:0x333333, beastFur:0x666666, cloth:0xec4899 },
 ];
+const CLIPMAPS={
+  kaykit:{ idle:'Unarmed_Idle', walk:'Walking_A', run:'Running_A', light:'Unarmed_Melee_Attack_Punch_A',
+    heavy:'Unarmed_Melee_Attack_Kick', specialH:'Unarmed_Melee_Attack_Punch_B', block:'Blocking',
+    hit:'Hit_A', death:'Death_A', win:'Cheer', jump:'Jump_Idle', transform:'Cheer' },
+  robot:{ idle:'Idle', walk:'Walking', run:'Running', light:'Punch', heavy:'Punch', specialH:'Punch',
+    specialB:'Punch', block:null, hit:null, death:'Death', win:'Dance', jump:'Jump', transform:'ThumbsUp' },
+};
+let playerCfg=ROSTER[0], matchCfgs=[];
+function buildMatchCfgs(){
+  const others=ROSTER.filter(c=>c.id!==playerCfg.id);
+  for(let i=others.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [others[i],others[j]]=[others[j],others[i]]; }
+  matchCfgs=others.slice(0,3).map((c,i)=>({
+    ...c, aggro:0.5+i*0.13,
+    hp: i===2? Math.round(c.hp*1.18) : c.hp,
+    dmgMul: i===2? c.dmgMul*1.08 : c.dmgMul,
+    scale: i===2? c.scale*1.06 : c.scale,
+  }));
+}
 let matchIdx=0, difficulty=1, roundNum=1, gameState='menu', timeScale=1, shake=0, slowT=0, hitstopT=0;
 let P=null, E=null;
 
@@ -580,23 +679,64 @@ function followPart(part, bone, off){
   part.position.copy(_v).add(_v2);
   part.quaternion.copy(_q);
 }
+/* ============ POSES (per-kind drivers) ============ */
 function poseFighter(f, dt, t){
-  const V=f.view, B=V.bones;
-  // --- choose base mocap clip ---
-  let clip='idle';
-  if(f.dead) clip='idle';
-  else if(gameState==='matchEnd' && f.wins>=2) clip='agree';
-  else if(!f.action && f.hitT<=0 && f.moveDir!==0 && f.y===0) clip = f.beast? 'run' : 'walk';
-  V.setClip(clip);
-  V.mixer.update(dt*(f.dead?0.25:1));
-  // --- root / fall transforms ---
+  const V=f.view, kind=f.cfg.kind;
+  const clipKind = kind==='kaykit' || kind==='robot';
+  // --- shared root / fall / lean transforms ---
   V.root.position.x=f.x;
   V.root.rotation.y = f.face>0? Math.PI/2 : -Math.PI/2;
-  const fallT = f.dead? -1.32 : 0;
+  const fallT = clipKind? 0 : (f.dead? -1.32 : 0);   // clip kinds fall inside their death clip
   V.body.rotation.x = THREE.MathUtils.damp(V.body.rotation.x, fallT, 6, dt);
-  V.body.position.y = f.y + (f.dead? 0.1 : 0);
+  V.body.position.y = f.y + (!clipKind && f.dead? 0.1 : 0);
   V.model.rotation.x = THREE.MathUtils.damp(V.model.rotation.x, f.beast? 0.14 : 0, 6, dt);
-  // --- bone overrides (applied AFTER mixer, per animation skill) ---
+  if(f.hitT>0) V.model.rotation.x -= 0.13*Math.min(1, f.hitT*4.2);
+  V.shield.visible = !!f.blocking && !f.dead;
+  if(V.aura.visible){
+    V.aura.rotation.y += dt*3.2;
+    const sc=1+Math.sin(t*11+f.phase)*0.1; V.auraRing.scale.set(sc,sc,1);
+  }
+  if(clipKind) poseClip(f, dt); else poseBone(f, dt, t);
+}
+
+/* KayKit / Robot: real animation clips drive everything */
+function poseClip(f, dt){
+  const V=f.view, M=CLIPMAPS[f.cfg.kind];
+  let name=null, opts={ fade:0.14 };
+  if(f.dead){ name=M.death; opts={ once:true, fade:0.1 }; }
+  else if(gameState==='matchEnd' && f.wins>=2){ name=M.win; opts={ fade:0.25 }; }
+  else if(f.action==='transform'){ name=M.transform; opts={ once:true, ts:1.3, fade:0.1 }; }
+  else if(f.action==='light'){ name=M.light; opts={ once:true, ts: f.cfg.kind==='robot'? 2.4 : 2.3, fade:0.06 }; }
+  else if(f.action==='heavy'){ name=M.heavy; opts={ once:true, ts: f.cfg.kind==='robot'? 1.5 : 1.8, fade:0.06 }; }
+  else if(f.action==='specialH'){ name=M.specialH; opts={ once:true, ts: f.cfg.kind==='robot'? 2.0 : 1.6, fade:0.06 }; }
+  else if(f.action==='specialB'){ name=f.cfg.sig || M.specialB; opts={ once:true, ts: f.cfg.sigTs || 2.0, fade:0.06 }; }
+  else if(f.hitT>0 && M.hit){
+    name=M.hit; opts={ once:true, ts:1.7, fade:0.05 };
+    if(V._prevHitT!==undefined && f.hitT>V._prevHitT+0.02) opts.restart=true; // fresh hit landed: replay reaction
+  }
+  else if(f.blocking && M.block){ name=M.block; opts={ fade:0.1 }; }
+  else if(f.y>0 && M.jump){ name=M.jump; opts={ fade:0.1 }; }
+  else if(f.moveDir!==0 && f.y===0){ name=f.beast? M.run : M.walk; opts={ fade:0.16 }; }
+  else { name=M.idle; opts={ fade:0.2 }; }
+  V._prevHitT=f.hitT;
+  if(name) V.playState(name, opts);
+  V.mixer.update(dt);
+  if(f.action!=='specialB') V.model.rotation.y = THREE.MathUtils.damp(V.model.rotation.y, 0, 12, dt);
+}
+
+/* Xbot / Michelle: mocap base clips + procedural bone overrides */
+function poseBone(f, dt, t){
+  const V=f.view, B=V.bones;
+  const dancing = f.cfg.kind==='michelle';
+  let clip='SambaDance';
+  if(!dancing){
+    clip='idle';
+    if(f.dead) clip='idle';
+    else if(gameState==='matchEnd' && f.wins>=2) clip='agree';
+    else if(!f.action && f.hitT<=0 && f.moveDir!==0 && f.y===0) clip = f.beast? 'run' : 'walk';
+  }
+  V.setClip(clip);
+  V.mixer.update(dt*(f.dead?0.25:1)*(f.beast&&dancing?1.3:1));
   const ov=(bone,axis,val)=>{ if(bone) bone.rotation[axis]+=val; };
   const busy=!!f.action;
   if(f.blocking && !busy){
@@ -606,9 +746,8 @@ function poseFighter(f, dt, t){
   if(f.hitT>0){
     const k=Math.min(1,f.hitT*4.2);
     ov(B.Spine,'x',-0.16*k); ov(B.Head,'x',-0.3*k);
-    V.model.rotation.x -= 0.14*k;
   }
-  if(f.beast && !busy && f.hitT<=0){ // beast guard: forearms raised, claws out
+  if(f.beast && !busy && f.hitT<=0 && f.cfg.kind==='xbot'){
     ov(B.RightForeArm,'y',-0.55); ov(B.LeftForeArm,'y',0.55);
   }
   if(f.action){
@@ -618,7 +757,7 @@ function poseFighter(f, dt, t){
       ov(B.RightArm,'y',-1.5*e); ov(B.RightForeArm,'y',-0.25*e); ov(B.Spine,'y',-0.35*e); ov(B.Spine,'x',0.1*e);
     } else if(f.action==='heavy'){
       const wind=env01((at-0.02)/0.2), e=strikeEnv(at,0.2,0.3,0.36,0.54);
-      ov(B.RightUpLeg,'x',0.35*wind*(1-e)); // chamber knee back-ish
+      ov(B.RightUpLeg,'x',0.35*wind*(1-e));
       ov(B.RightUpLeg,'x',-1.25*e); ov(B.RightLeg,'x',(0.95-0.85*Math.max(0,(at-0.26)/0.1))*e);
       ov(B.Spine,'y',0.3*e); ov(B.LeftArm,'y',0.7*e);
     } else if(f.action==='specialH'){
@@ -638,16 +777,15 @@ function poseFighter(f, dt, t){
     }
   }
   if(f.action!=='specialB') V.model.rotation.y = THREE.MathUtils.damp(V.model.rotation.y, 0, 12, dt);
-  // --- attachments follow bones ---
   V.model.updateMatrixWorld(true);
-  if(V.beastHead.visible) followPart(V.beastHead, B.Head, _v2.set(0,0.1,0.04));
-  if(V.clawR.visible) followPart(V.clawR, B.RightHand, _v2.set(0,0.02,0.02));
-  if(V.clawL.visible) followPart(V.clawL, B.LeftHand, _v2.set(0,0.02,0.02));
-  if(V.tailG.visible){
+  if(V.beastHead && V.beastHead.visible) followPart(V.beastHead, B.Head, _v2.set(0,0.1,0.04));
+  if(V.clawR && V.clawR.visible) followPart(V.clawR, B.RightHand, _v2.set(0,0.02,0.02));
+  if(V.clawL && V.clawL.visible) followPart(V.clawL, B.LeftHand, _v2.set(0,0.02,0.02));
+  if(V.tailG && V.tailG.visible){
     followPart(V.tailG, B.Hips, _v2.set(0,0.02,-0.05));
     V.tailG.rotateY(Math.sin(t*3.4+f.phase)*0.3);
   }
-  followPart(V.emblem, B.Spine1, _v2.set(0,0.06,0.26));
+  if(V.emblem) followPart(V.emblem, B.Spine1, _v2.set(0,0.06,0.26));
 }
 
 /* ============ AI ============ */
@@ -716,21 +854,28 @@ function showBanner(txt, dur=850){
 }
 function renderLadder(el){
   el.innerHTML='';
-  LADDER.forEach((c,i)=>{
+  matchCfgs.forEach((c,i)=>{
     const d=document.createElement('div');
     d.className='rung'+(i<matchIdx?' done':i===matchIdx?' now':'');
     d.textContent=(i<matchIdx?'✓ ':'')+c.name+' · '+c.sub;
     el.appendChild(d);
   });
 }
-function startMatch(idx){
+async function startMatch(idx){
   matchIdx=idx;
+  $('loadOverlay').style.display='flex';
+  try{
+    await loadModel(playerCfg.file);
+    await loadModel(matchCfgs[idx].file);
+  }catch(err){ console.error('Model load failed', err); }
+  $('loadOverlay').style.display='none';
+  $('hud').style.display='block'; $('touch').classList.add('on');
   if(P){ P.view.dispose(); E.view.dispose(); }
-  P=makeCombatant(PLAYER_CFG, true);
-  E=makeCombatant(LADDER[idx], false);
+  P=makeCombatant({...playerCfg}, true);
+  E=makeCombatant({...matchCfgs[idx]}, false);
   P.wins=0; E.wins=0; roundNum=1;
-  $('nameL').innerHTML=`${PLAYER_CFG.name} <small>· ${PLAYER_CFG.sub}</small>`;
-  $('nameR').innerHTML=`${LADDER[idx].name} <small>· ${LADDER[idx].sub}</small>`;
+  $('nameL').innerHTML=`${playerCfg.name} <small>· ${playerCfg.sub}</small>`;
+  $('nameR').innerHTML=`${matchCfgs[idx].name} <small>· ${matchCfgs[idx].sub}</small>`;
   renderLadder($('ladder')); renderLadder($('ladder2'));
   startRound();
 }
@@ -762,14 +907,14 @@ function matchEnd(winner){
   gameState='matchEnd';
   lastWin = winner===P;
   setTimeout(()=>{
-    if(lastWin && matchIdx>=LADDER.length-1){
+    if(lastWin && matchIdx>=matchCfgs.length-1){
       $('endTitle').textContent='🏆 NHÀ VÔ ĐỊCH ĐẤU TRƯỜNG!';
-      $('endSub').textContent='Bạn đã hạ cả Hổ, Báo đen và Gấu — FANG là vua thú mới!';
+      $('endSub').textContent=`Bạn đã hạ cả 3 đối thủ — ${playerCfg.name} là vua đấu trường mới!`;
       $('nextBtn').style.display='none';
     } else if(lastWin){
       $('endTitle').textContent='THẮNG TRẬN!';
-      $('endSub').textContent=`Đối thủ tiếp theo: ${LADDER[matchIdx+1].name} · ${LADDER[matchIdx+1].sub}`;
-      $('nextBtn').style.display=''; $('nextBtn').innerHTML='▶ &nbsp;ĐẤU VỚI '+LADDER[matchIdx+1].name;
+      $('endSub').textContent=`Đối thủ tiếp theo: ${matchCfgs[matchIdx+1].name} · ${matchCfgs[matchIdx+1].sub}`;
+      $('nextBtn').style.display=''; $('nextBtn').innerHTML='▶ &nbsp;ĐẤU VỚI '+matchCfgs[matchIdx+1].name;
     } else {
       $('endTitle').textContent='THUA RỒI...';
       $('endSub').textContent=`${E.cfg.name} quá mạnh. Luyện combo: Đấm → Đấm → Đá, và biến hình đúng lúc!`;
@@ -830,31 +975,70 @@ document.querySelectorAll('[data-act]').forEach(b=>{
   }, {passive:false});
 });
 
-/* ============ BUTTONS ============ */
+/* ============ CHARACTER SELECT + BUTTONS ============ */
+let selBuilt=false;
+function buildSelectCards(){
+  if(selBuilt) return; selBuilt=true;
+  const grid=$('selGrid');
+  const maxHp=126, maxSpd=4.2, maxDmg=1.12;
+  ROSTER.forEach(cfg=>{
+    const card=document.createElement('div');
+    card.className='selCard'; card.style.borderColor=cfg.accent+'66';
+    card.innerHTML=`
+      <div class="ic">${cfg.icon}</div>
+      <div class="nm" style="color:${cfg.accent}">${cfg.name}</div>
+      <div class="sb">${cfg.sub}</div>
+      <div class="st">${cfg.style}</div>
+      <div class="barRow"><span>MÁU</span><div class="bar"><i style="width:${Math.round(cfg.hp/maxHp*100)}%;background:#f87171"></i></div></div>
+      <div class="barRow"><span>TỐC</span><div class="bar"><i style="width:${Math.round(cfg.spd/maxSpd*100)}%;background:#38bdf8"></i></div></div>
+      <div class="barRow"><span>ĐÒN</span><div class="bar"><i style="width:${Math.round(cfg.dmgMul/maxDmg*100)}%;background:#fbbf24"></i></div></div>`;
+    card.onmouseenter=()=>{ card.style.borderColor=cfg.accent; };
+    card.onmouseleave=()=>{ card.style.borderColor=cfg.accent+'66'; };
+    card.onclick=()=>pickCharacter(cfg);
+    grid.appendChild(card);
+  });
+}
+async function pickCharacter(cfg){
+  playerCfg=cfg;
+  buildMatchCfgs();
+  $('selTip').textContent='Đang chuẩn bị trận đấu với '+cfg.name+'...';
+  $('selectScreen').style.display='none';
+  gameState='intro';
+  startMusic();
+  await startMatch(0);
+}
 function beginGame(diff){
   if(!assetsReady) return;
   difficulty=diff;
   $('startScreen').style.display='none'; $('endScreen').style.display='none';
-  $('hud').style.display='block'; $('touch').classList.add('on');
-  startMusic(); startMatch(0);
+  buildSelectCards();
+  $('selTip').textContent='';
+  $('selectScreen').style.display='flex';
+  gameState='select';
 }
 $('startNormal').onclick=()=>beginGame(1);
 $('startHard').onclick=()=>beginGame(2);
-$('nextBtn').onclick=()=>{ $('endScreen').style.display='none'; startMusic(); startMatch(lastWin? Math.min(matchIdx+1, LADDER.length-1) : matchIdx); };
+$('nextBtn').onclick=()=>{ $('endScreen').style.display='none'; startMusic(); startMatch(lastWin? Math.min(matchIdx+1, matchCfgs.length-1) : matchIdx); };
 $('retryBtn').onclick=()=>{ $('endScreen').style.display='none'; startMusic(); startMatch(0); };
+$('changeBtn').onclick=()=>{ $('endScreen').style.display='none'; $('hud').style.display='none'; $('touch').classList.remove('on'); buildSelectCards(); $('selTip').textContent=''; $('selectScreen').style.display='flex'; gameState='select'; };
 
-/* menu backdrop fighters (after the model finishes loading) */
+/* menu backdrop fighters + roster preview (Xbot loads first) */
 let assetsReady=false;
-$('startNormal').textContent='⏳ ĐANG TẢI VÕ SĨ...';
+$('startNormal').textContent='⏳ ĐANG TẢI...';
 $('startHard').textContent='⏳';
-loadFighterAssets().then(()=>{
+loadModel('models/Xbot.glb').then(()=>{
   assetsReady=true;
-  P=makeCombatant(PLAYER_CFG, true); E=makeCombatant(LADDER[0], false);
+  P=makeCombatant({...ROSTER[0]}, true);
+  E=makeCombatant({...ROSTER[0], tint:0xd9b48c, joint:0x991b1b}, false);
   resetFighter(P,-2.2,1); resetFighter(E,2.2,-1);
   $('startNormal').innerHTML='⚔️ &nbsp;ĐẤU THƯỜNG';
   $('startHard').innerHTML='🔥 &nbsp;ĐẤU KHÓ';
+  const el=$('ladder'); el.innerHTML='';
+  ROSTER.forEach(c=>{
+    const d=document.createElement('div'); d.className='rung';
+    d.textContent=c.icon+' '+c.name+' · '+c.sub; el.appendChild(d);
+  });
 }).catch(err=>{ console.error('Model load failed', err); $('startNormal').textContent='LỖI TẢI MODEL — TẢI LẠI TRANG'; });
-renderLadder($('ladder'));
 
 /* ============ MAIN LOOP ============ */
 const timer=new THREE.Timer(); timer.connect(document);
