@@ -119,6 +119,10 @@
   #endScreen .logo{font-size:clamp(22px,4.5vw,34px)}
   #changeBtn{display:none}
 </style>
+<style>
+  #hitVig{position:fixed;inset:0;pointer-events:none;z-index:7;opacity:0;
+    background:radial-gradient(ellipse at center, transparent 52%, rgba(255,26,26,.62) 100%)}
+</style>
 </head>
 <body>
 <div id="game"></div>
@@ -149,6 +153,7 @@
 <div class="combo" id="comboL">0<small>COMBO</small></div>
 <div class="combo" id="comboR">0<small>COMBO</small></div>
 <div id="floaters"></div>
+<div id="hitVig"></div>
 <div id="banner"><div id="bannerTxt"></div></div>
 
 <div class="screen" id="startScreen">
@@ -216,6 +221,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 /* ============ RENDERER / SCENE ============ */
 const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
@@ -325,6 +331,98 @@ const emberGeo=new THREE.BufferGeometry();
 }
 const embers=new THREE.Points(emberGeo, new THREE.PointsMaterial({ color:0xffa040, size:0.09, transparent:true, opacity:0.85, blending:THREE.AdditiveBlending, depthWrite:false }));
 scene.add(embers);
+/* ============ STADIUM: tiered stands + animated crowd + flags ============ */
+let crowdEnergy=0.4;
+const crowdData=[];
+let crowdMesh=null;
+const _dummy=new THREE.Object3D();
+{
+  // tiered ring stands
+  const stoneCols=[0x2a2145,0x332a52,0x241b3d];
+  for(let i=0;i<3;i++){
+    const R=14+i*2.3, topY=1.05+i*1.12;
+    const tier=new THREE.Mesh(new THREE.CylinderGeometry(R+2.0,R+2.0,1.12,44),
+      new THREE.MeshStandardMaterial({ color:stoneCols[i], roughness:0.95 }));
+    tier.position.y=topY-0.56; tier.receiveShadow=true; scene.add(tier);
+    const trim=new THREE.Mesh(new THREE.TorusGeometry(R+2.0,0.045,8,64),
+      new THREE.MeshBasicMaterial({ color:0xff9a2a }));
+    trim.rotation.x=Math.PI/2; trim.position.y=topY+0.02; scene.add(trim);
+  }
+  // crowd: one merged low-poly person, instanced ~330 times
+  const pBody=new THREE.CylinderGeometry(0.15,0.21,0.6,6); pBody.translate(0,0.55,0);
+  const pShoulders=new THREE.BoxGeometry(0.46,0.2,0.24); pShoulders.translate(0,0.86,0);
+  const pHead=new THREE.SphereGeometry(0.155,8,6); pHead.translate(0,1.08,0);
+  const personGeo=mergeGeometries([pBody,pShoulders,pHead]);
+  const crowdMat=new THREE.MeshStandardMaterial({ roughness:0.9 });
+  const COUNT=330;
+  crowdMesh=new THREE.InstancedMesh(personGeo, crowdMat, COUNT);
+  crowdMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  const palette=[0xef4444,0xf97316,0xfacc15,0x22c55e,0x38bdf8,0xa78bfa,0xf472b6,0xe2e8f0,0xfb923c,0x34d399,0xf8fafc,0x93c5fd];
+  const col=new THREE.Color();
+  for(let i=0;i<COUNT;i++){
+    const tierI=i%3, R=14+tierI*2.3, ang=Math.random()*Math.PI*2, rad=R+0.25+Math.random()*1.5;
+    const x=Math.cos(ang)*rad, z=Math.sin(ang)*rad, y=1.05+tierI*1.12;
+    crowdData.push({ x, y, z, rot:Math.atan2(-x,-z), ph:Math.random()*6.28, sp:0.8+Math.random()*0.5, sc:0.9+Math.random()*0.3 });
+    col.setHex(palette[i%palette.length]).offsetHSL(0,0,(Math.random()-0.5)*0.08);
+    crowdMesh.setColorAt(i, col);
+  }
+  crowdMesh.instanceColor.needsUpdate=true;
+  scene.add(crowdMesh);
+  // flags on poles around the stands
+  window.__flags=[];
+  const flagCols=[0xdc2626,0xf97316,0x7c3aed,0x2563eb,0x059669,0xfacc15];
+  for(let i=0;i<6;i++){
+    const ang=Math.PI*(0.08+ i*0.168), R=21.5;
+    const x=Math.cos(ang)*R, z=-Math.abs(Math.sin(ang))*R*0.9-2;
+    const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.08,6.4,8),
+      new THREE.MeshStandardMaterial({ color:0x4a3b2a, roughness:0.8 }));
+    pole.position.set(x,3.2,z); scene.add(pole);
+    const fgeo=new THREE.PlaneGeometry(1.5,0.95,10,5);
+    const flag=new THREE.Mesh(fgeo, new THREE.MeshBasicMaterial({ color:flagCols[i], side:THREE.DoubleSide }));
+    flag.position.set(x+0.78,5.85,z); scene.add(flag);
+    window.__flags.push({ mesh:flag, base:fgeo.attributes.position.array.slice(), ph:i*1.3 });
+  }
+}
+const flags = window.__flags; delete window.__flags;
+/* sweeping colored spotlights for drama */
+const sweepA=new THREE.SpotLight(0x8b5cf6, 300, 42, 0.55, 1, 1.5); sweepA.position.set(-7,13,-4);
+sweepA.target.position.set(0,1,0); scene.add(sweepA); scene.add(sweepA.target);
+const sweepB=new THREE.SpotLight(0xf97316, 300, 42, 0.55, 1, 1.5); sweepB.position.set(7,13,-4);
+sweepB.target.position.set(0,1,0); scene.add(sweepB); scene.add(sweepB.target);
+/* impact FX: reusable flash light + shockwave ring pool */
+const flashLight=new THREE.PointLight(0xffc46b, 0, 9, 1.8); scene.add(flashLight);
+const ringPool=[];
+for(let i=0;i<4;i++){
+  const rm=new THREE.Mesh(new THREE.RingGeometry(0.32,0.52,26),
+    new THREE.MeshBasicMaterial({ color:0xffd9a0, transparent:true, opacity:0, blending:THREE.AdditiveBlending, side:THREE.DoubleSide, depthWrite:false }));
+  rm.visible=false; rm.userData.life=0; scene.add(rm); ringPool.push(rm);
+}
+let ringIdx=0;
+function impactFX(pos, big){
+  flashLight.position.copy(pos); flashLight.intensity = big? 70 : 36;
+  const rm=ringPool[ringIdx++ % ringPool.length];
+  rm.position.copy(pos); rm.scale.setScalar(0.6); rm.userData.life=0.28; rm.visible=true;
+}
+function pulseVig(v){
+  const el=$('hitVig'); if(!el) return;
+  el.style.transition='none'; el.style.opacity=v;
+  setTimeout(()=>{ el.style.transition='opacity .6s'; el.style.opacity=0; }, 70);
+}
+/* confetti bursts (win / K.O. celebrations) */
+const confettis=[];
+function spawnConfetti(x){
+  const n=110, geo=new THREE.BufferGeometry(), pos=new Float32Array(n*3), colArr=new Float32Array(n*3), v=[];
+  const cols=[0xffd34d,0xef4444,0x38bdf8,0x22c55e,0xf472b6,0xf97316].map(h=>new THREE.Color(h));
+  for(let i=0;i<n;i++){
+    pos[i*3]=x+rand(-0.5,0.5); pos[i*3+1]=2.7+rand(0,0.6); pos[i*3+2]=rand(-0.4,0.4);
+    v.push(new THREE.Vector3(rand(-2.4,2.4), rand(1.5,4.6), rand(-1.2,1.2)));
+    const c=cols[i%cols.length]; colArr[i*3]=c.r; colArr[i*3+1]=c.g; colArr[i*3+2]=c.b;
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(pos,3));
+  geo.setAttribute('color', new THREE.BufferAttribute(colArr,3));
+  const pts=new THREE.Points(geo, new THREE.PointsMaterial({ size:0.14, vertexColors:true, transparent:true }));
+  pts.userData={ v, life:2.4 }; scene.add(pts); confettis.push(pts);
+}
 
 /* ============ FIGHTER BUILDER (real Xbot model + beast attachments) ============ */
 const TEMPLATES={};
@@ -498,6 +596,7 @@ const sfx={
   jump(){ beep(240,0.14,'sine',0.07,160); },
   roar(){ beep(82,0.8,'sawtooth',0.3,-30); beep(58,0.9,'square',0.2,-18); noiseHit(0.7,0.16,500); },
   ko(){ beep(160,0.7,'sawtooth',0.25,-120); noiseHit(0.5,0.3,400); },
+  cheer(){ noiseHit(1.3,0.20,800); noiseHit(1.7,0.15,520,0.15); noiseHit(1.1,0.10,1100,0.3); },
   bell(){ beep(880,0.5,'sine',0.14); beep(1320,0.6,'sine',0.1,0,0.05); },
 };
 /* battle BGM: dark D-minor sequencer */
@@ -641,13 +740,15 @@ function applyHit(att, def, A, dmgOverride){
   def.hp-=dmg;
   const chest=new THREE.Vector3(def.x, 1.45*(def.cfg.scale||1)+def.y, 0.3);
   if(blocked){
-    sfx.block(); burst(chest, 0x93c5fd, 10, 2.4, 0.13);
+    sfx.block(); burst(chest, 0x93c5fd, 10, 2.4, 0.13); crowdEnergy=Math.min(1.8,crowdEnergy+0.1);
     def.vx=att.face*A.push*0.5; att.vx=-att.face*0.4;
     floater(def, 'ĐỠ!', 'blocked');
     att.gauge=Math.min(100, att.gauge+dmg*0.4);
   } else {
     if(att.action==='specialB' || att.action==='specialH') sfx.slash(); else if(A.dmg>=11) sfx.heavy(); else sfx.punch();
     burst(chest, att.beast? 0xffb020 : 0xffe08a, A.dmg>=11? 22:14, A.dmg>=11? 4.6:3.4, 0.17);
+    impactFX(chest, A.dmg>=11); crowdEnergy=Math.min(2, crowdEnergy+(A.dmg>=11?0.55:0.3));
+    if(A.dmg>=11) pulseVig(0.5);
     def.hitT=A.kbT; def.hitDir=att.face; def.action=null; def.vx=att.face*A.push;
     floater(def, '-'+dmg, A.dmg>=11? 'crit':'');
     hitstopT=Math.max(hitstopT, A.dmg>=11? 0.085 : 0.05);
@@ -911,14 +1012,15 @@ function startRound(){
   P.wins=P.wins||0; E.wins=E.wins||0;
   roundTimer=60; gameState='intro';
   updateHUD();
-  showBanner('VÁN '+roundNum, 800);
+  showBanner('VÁN '+roundNum, 800); crowdEnergy=Math.max(crowdEnergy,0.9);
   setTimeout(()=>{ if(gameState==='intro'){ showBanner('ĐẤU!', 500); sfx.bell(); } }, 850);
   setTimeout(()=>{ if(gameState==='intro') gameState='fight'; }, 1300);
 }
 function endRound(winner){
   const loser = winner===P? E : P;
   if(loser.hp<=0){ loser.dead=true; loser.hitDir=winner.face; sfx.ko(); slowT=1.15; shake=0.9;
-    burst(new THREE.Vector3(loser.x,1,0), 0xffffff, 30, 5.5, 0.2); }
+    burst(new THREE.Vector3(loser.x,1,0), 0xffffff, 30, 5.5, 0.2);
+    crowdEnergy=2.3; spawnConfetti(loser.x); sfx.cheer(); pulseVig(0.8); }
   else sfx.bell();
   winner.wins++;
   gameState='roundEnd';
@@ -1161,6 +1263,51 @@ function animate(){
     pos.needsUpdate=true;
   }
   skyDome.position.x = camera.position.x;
+  // crowd excitement: energy decays, fans bounce harder as it rises
+  crowdEnergy=Math.max(0.25, crowdEnergy-rawDt*0.22);
+  if(crowdMesh){
+    const amp=0.04+crowdEnergy*0.15, fr=2.1+crowdEnergy*2.8;
+    for(let i=0;i<crowdData.length;i++){
+      const c=crowdData[i];
+      _dummy.position.set(c.x, c.y + Math.abs(Math.sin(t*fr*c.sp + c.ph))*amp*c.sc, c.z);
+      _dummy.rotation.set(0, c.rot, Math.sin(t*1.3+c.ph)*0.03);
+      _dummy.scale.setScalar(c.sc); _dummy.updateMatrix();
+      crowdMesh.setMatrixAt(i, _dummy.matrix);
+    }
+    crowdMesh.instanceMatrix.needsUpdate=true;
+  }
+  // waving flags
+  for(const fl of flags){
+    const pos=fl.mesh.geometry.attributes.position, base=fl.base;
+    for(let j=0;j<pos.count;j++){
+      const bx=base[j*3];
+      pos.array[j*3+2]=Math.sin(bx*4 + t*7 + fl.ph)*0.1*((bx+0.75)/1.5);
+    }
+    pos.needsUpdate=true;
+  }
+  // sweeping spotlights + impact flash decay + shockwave rings
+  sweepA.position.x=Math.sin(t*0.45)*7.5; sweepB.position.x=Math.cos(t*0.38)*7.5;
+  flashLight.intensity*=Math.exp(-rawDt*15);
+  for(const rm of ringPool){
+    if(rm.userData.life>0){
+      rm.userData.life-=rawDt;
+      rm.scale.addScalar(rawDt*8);
+      rm.material.opacity=Math.max(rm.userData.life/0.28,0)*0.9;
+      if(rm.userData.life<=0) rm.visible=false;
+    }
+  }
+  // confetti
+  for(let i=confettis.length-1;i>=0;i--){
+    const cf=confettis[i]; cf.userData.life-=rawDt;
+    const pos=cf.geometry.attributes.position;
+    for(let j=0;j<cf.userData.v.length;j++){
+      const v=cf.userData.v[j]; v.y-=3.4*rawDt;
+      pos.array[j*3]+=v.x*rawDt; pos.array[j*3+1]+=Math.max(v.y,-0.4)*rawDt; pos.array[j*3+2]+=v.z*rawDt;
+      if(pos.array[j*3+1]<0.03) pos.array[j*3+1]=0.03;
+    }
+    pos.needsUpdate=true; cf.material.opacity=Math.min(1, cf.userData.life);
+    if(cf.userData.life<=0){ scene.remove(cf); confettis.splice(i,1); }
+  }
   // camera
   shake=Math.max(0, shake-rawDt*1.7);
   const mid=P&&E? (P.x+E.x)/2 : 0;
